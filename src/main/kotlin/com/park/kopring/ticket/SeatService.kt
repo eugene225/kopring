@@ -10,17 +10,10 @@ class SeatService(
     private val redisTemplate: StringRedisTemplate
 ) {
 
-    fun initSeats(seats: List<String>) {
-        val ops = redisTemplate.opsForValue()
-        seats.forEach { seatId ->
-            ops.set("seat:$seatId", "AVAILABLE")
-        }
-    }
-
-    fun holdSeat(seatId: String, userId: String): Boolean {
-        val script = DefaultRedisScript<Long>()
-        script.setScriptText(
-            """
+    companion object LuaScript {
+        val AVAILABLE_TO_HOLD: DefaultRedisScript<Long> = DefaultRedisScript<Long>().apply {
+            setScriptText(
+                """
             if redis.call('get', KEYS[1]) == 'AVAILABLE' then
                 redis.call('set', KEYS[1], ARGV[1])
                 redis.call('expire', KEYS[1], 300)
@@ -29,11 +22,23 @@ class SeatService(
                 return 0
             end
             """.trimIndent()
-        )
-        script.resultType = Long::class.java
+            )
+            resultType = Long::class.java
+        }
+    }
 
-        val result = redisTemplate.execute(script, listOf("seat:$seatId"), "HELD:$userId")
-        return result == 1L
+    fun initSeats(seats: List<String>) {
+        val ops = redisTemplate.opsForValue()
+        seats.forEach { seatId ->
+            ops.set("seat:$seatId", "AVAILABLE")
+        }
+    }
+
+    fun holdSeat(seatId: String, userId: String): Boolean {
+        return runCatching {
+            val result = redisTemplate.execute(LuaScript.AVAILABLE_TO_HOLD, listOf("seat:$seatId"), "HELD:$userId")
+            result == 1L
+        }.getOrElse { throw RuntimeException("Redis Lua script 실행 실패", it) }
     }
 
     fun confirmSeat(seatId: String, userId: String): Boolean {
