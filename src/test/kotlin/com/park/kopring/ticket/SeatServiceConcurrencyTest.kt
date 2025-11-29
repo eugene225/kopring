@@ -70,4 +70,56 @@ class SeatServiceRetryConfirmTest @Autowired constructor(
             assert(status == "SOLD")
         }
     }
+
+    @Test
+    fun `락을 활용한 동시성 테스트`() {
+        val soldSeats = mutableSetOf<String>()
+        val userCounter = AtomicInteger(0)
+        val random = java.util.Random()
+        val executor = Executors.newFixedThreadPool(10)
+
+        while (soldSeats.size < seatIds.size) {
+            val latch = CountDownLatch(1)
+
+            executor.submit {
+                val seatId = seatIds.filter { it !in soldSeats }.random()
+                val userId = "user${userCounter.getAndIncrement()}"
+
+                val held = seatService.holdSeatWithLock(seatId, userId)
+                if (held) {
+                    println("✅ 선점 성공: $seatId by $userId")
+
+                    // 랜덤으로 결제 성공/실패
+                    val confirmSuccess = if (random.nextBoolean()) {
+                        seatService.confirmSeat(seatId, userId)
+                    } else {
+                        println("💥 $userId 결제 실패 (강제 실패)")
+                        false
+                    }
+
+                    if (confirmSuccess) {
+                        println("🎉 구매 완료: $seatId by $userId")
+                        soldSeats.add(seatId)
+                    } else {
+                        // 실패 시 AVAILABLE 복원
+                        seatService.releaseSeat(seatId, userId)
+                        println("🔁 $seatId 좌석 복원됨")
+                    }
+                } else {
+                    println("❌ 선점 실패: $seatId by $userId")
+                }
+
+                latch.countDown()
+            }
+
+            latch.await()
+        }
+
+        // 최종 검증
+        seatIds.forEach { seatId ->
+            val status = seatService.getSeatStatus(seatId)
+            println("🪑 최종 상태: $seatId = $status")
+            assert(status == "SOLD")
+        }
+    }
 }
