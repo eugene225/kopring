@@ -120,7 +120,7 @@ class RabbitMQConfig {
     fun paymentQueue(): Queue {
         return QueueBuilder.durable(PAYMENT_QUEUE)
             .withArgument("x-dead-letter-exchange", DLQ_EXCHANGE)
-            .withArgument("x-dead-letter-routing-key", "payment.failed")
+            .withArgument("x-dead-letter-routing-key", DLQ_ROUTING_KEY)
             .build()
     }
 
